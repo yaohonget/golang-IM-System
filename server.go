@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 )
 
 type Server struct {
@@ -47,22 +48,18 @@ func (this *Server) ListenMessage() {
 func (this *Server) Handler(conn net.Conn) {
 	fmt.Println("Connection successful.")
 
-	user := NewUser(conn)
+	user := NewUser(conn, this)
 
-	this.mapLock.Lock()
+	user.Online()
 
-	this.OnlineMap[user.Name] = user
-
-	this.mapLock.Unlock()
-
-	this.BroadCast(user, "Online...")
+	isLive := make(chan bool)
 
 	go func() {
 		buf := make([]byte, 4096)
 		for {
 			n, err := conn.Read(buf)
 			if n == 0 {
-				this.BroadCast(user, "Offline...")
+				user.Offline()
 				return
 			}
 
@@ -72,11 +69,22 @@ func (this *Server) Handler(conn net.Conn) {
 			}
 
 			msg := string(buf[:n-1])
-			this.BroadCast(user, msg)
+			user.DoMessage(msg)
+
+			isLive <- true
 		}
 	}()
 
-	select {}
+	for {
+		select {
+		case <-isLive:
+		case <-time.After(time.Second * 20):
+			user.SendUserMessage("You are timeout...")
+			close(user.C)
+			conn.Close()
+			return
+		}
+	}
 
 }
 
